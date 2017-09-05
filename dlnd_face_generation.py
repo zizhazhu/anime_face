@@ -1,11 +1,20 @@
 # coding: utf-8
-import os
 import math
 import matplotlib.pyplot as plt
 from glob import glob
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+
+
+def scale(x, feature_range=(-1, 1)):
+    # scale to (0, 1)
+    x = ((x - x.min())/(255 - x.min()))
+
+    # scale to feature_range
+    Min, Max = feature_range
+    x = x * (Max - Min) + Min
+    return x
 
 
 def get_batches(dataset, batch_size):
@@ -15,7 +24,7 @@ def get_batches(dataset, batch_size):
             next_index = index + batch_size
         else:
             next_index = -1
-        yield dataset[index:next_index]
+        yield scale(dataset[index:next_index])
         index = next_index
 
 
@@ -43,7 +52,7 @@ def model_inputs(image_width, image_height, image_channels, z_dim):
     return inputs_real, inputs_z, learning_rate
 
 
-def discriminator(images, reuse=False, alpha=0.2, drop_rate=0., size_mult=64):
+def discriminator(images, reuse=False, alpha=0.2, drop_rate=0., size_mult=32):
     with tf.variable_scope('discriminator', reuse=reuse):
         # input 96 * 96 * 3
         # images = tf.layers.dropout(images, rate=drop_rate/2.5)
@@ -75,7 +84,7 @@ def discriminator(images, reuse=False, alpha=0.2, drop_rate=0., size_mult=64):
     return out, logits
 
 
-def generator(z, out_channel_dim, is_train=True, alpha=0.2, size_mult=128):
+def generator(z, out_channel_dim, is_train=True, alpha=0.2, size_mult=64):
     with tf.variable_scope('generator', reuse=not is_train):
         # 6 * 6 * 1024
         z_o = tf.layers.dense(z, 6 * 6 * size_mult * 8)
@@ -104,7 +113,7 @@ def generator(z, out_channel_dim, is_train=True, alpha=0.2, size_mult=128):
 
         # 96 * 96 * 3
         logits = tf.layers.conv2d_transpose(layer_3, out_channel_dim, 5, strides=2, padding='same')
-        out = tf.sigmoid(logits)
+        out = tf.tanh(logits)
     return out
 
 
@@ -130,9 +139,10 @@ def model_opt(d_loss, g_loss, learning_rate, beta1):
     t_vars = tf.trainable_variables()
     g_vars = [var for var in t_vars if var.name.startswith('generator')]
     d_vars = [var for var in t_vars if var.name.startswith('discriminator')]
-    
-    d_train_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(d_loss, var_list=d_vars)
-    g_train_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(g_loss, var_list=g_vars)
+
+    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+        d_train_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(d_loss, var_list=d_vars)
+        g_train_opt = tf.train.AdamOptimizer(learning_rate, beta1=beta1).minimize(g_loss, var_list=g_vars)
     return d_train_opt, g_train_opt
 
 
@@ -173,7 +183,7 @@ def train(epochs, batch_size, z_dim, learning_rate, beta1, dataset, image_mode):
             print("Epoch {}/{}...".format(epoch_i+1, epochs),
               "Discriminator Loss: {:.4f}...".format(train_loss_d),
               "Generator Loss: {:.4f}".format(train_loss_g))
-            if epoch_i % 10 == 0:
+            if epoch_i % 1 == 0:
                 show_generator_output(sess, 16, inputs_z, 3, image_mode)
 
 
@@ -186,7 +196,7 @@ if __name__ == '__main__':
     show_images = read_pic(pic_files[:show_n_images])
     plt.imshow(images_square_grid(show_images, 'RGB'))
 
-    batch_size = 512
+    batch_size = 64
     z_dim = 100
     learning_rate = 0.0002
     beta1 = 0.9
